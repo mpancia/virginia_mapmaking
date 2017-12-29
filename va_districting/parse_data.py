@@ -26,12 +26,26 @@ if __name__ == "__main__":
     # Pad code to correct length and set it to the index
     demo_df["CODE"] = demo_df["CODE"].astype(str).map(lambda x: x.zfill(7))
     demo_df = demo_df.set_index(demo_df["CODE"]).rename(columns={
-        'Population' : 'population'
+        'Population' : 'population',
+        'Democratic' : 'surveyed_democrat',
+        'Independent' : 'surveyed_independent',
+        'Independent Green' : 'surveyed_independent_green',
+        'Libertarian' : 'surveyed_libertarian',
+        'Republican' : 'surveyed_republican',
+        'Grand Total' : 'surveyed_total',
+        '(blank)' : 'surveyed_blank'
     })
 
     # Select wanted columns
     DEMO_COLUMNS = [
-        "population"
+        "population",
+        'surveyed_democrat',
+        'surveyed_independent_green',
+        'surveyed_independent',
+        'surveyed_republican',
+        'surveyed_blank',
+        'surveyed_total',
+        'surveyed_libertarian'
     ]
     demo_df = demo_df[DEMO_COLUMNS]
 
