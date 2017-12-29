@@ -38,7 +38,7 @@ if __name__ == "__main__":
 
     # Select wanted columns
     DEMO_COLUMNS = [
-        "population",
+        'population',
         'surveyed_democrat',
         'surveyed_independent_green',
         'surveyed_independent',
@@ -48,6 +48,9 @@ if __name__ == "__main__":
         'surveyed_libertarian'
     ]
     demo_df = demo_df[DEMO_COLUMNS]
+
+    # Fill NaN with 0 for survey responses
+    demo_df = demo_df.fillna(0)
 
     # Join with geo data
     joined = geo_df.join(demo_df)
