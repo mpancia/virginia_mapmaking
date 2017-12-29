@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.INFO)
 
 geo_out_location = "../data/demo_shapefile.geojson"
 graph_location = "../data/graph.graphml"
-
+SAVE_LOCATION = os.environ("MAP_SAVE_LOCATION")
 
 @attr.s
 class Cluster(object):
@@ -228,7 +228,7 @@ if __name__ == "__main__":
             return clustering, variance
 
     geo_df = gpd.read_file(geo_out_location).to_crs({'init' : 'epsg:3687'}).set_index('CODE')
-    manifest_path = os.path.join('/Users', 'msp', 'Desktop', 'shapes', 'manifest.csv')
+    manifest_path = os.path.join(SAVE_LOCATION, 'manifest.csv')
     row = ['path', 'variance', 'disconnected_components']
     with open(manifest_path, "w") as file:
         writer = csv.writer(file)
@@ -244,7 +244,7 @@ if __name__ == "__main__":
         logging.info('Generated map with {} disconnected components and {} population variance.'.format(disconnected_count, variance))
 
         stub = str(uuid.uuid4())
-        write_path = os.path.join('/Users', 'msp', 'Desktop', 'shapes', stub + '.geojson')
+        write_path = os.path.join(SAVE_LOCATION, stub + '.geojson')
         logging.info('Written to {}'.format(write_path))
         row = [stub + '.geojson', variance, disconnected_count]
         with open(manifest_path, "a") as file:
