@@ -9,18 +9,18 @@ import geopandas as gpd
 from rtree import index
 
 # Locations
-geojson_location = "../data/vaprecincts2013.geojson"
-adj_list_location = "../data/adjacency_list.csv"
-demo_location = "../data/demo_data.csv"
-geo_out_location = "../data/demo_shapefile.geojson"
-graph_location = "../data/graph.graphml"
+GEOJSON_LOCATION = "../data/vaprecincts2013.geojson"
+ADJ_LIST_LOCATION = "../data/adjacency_list.csv"
+DEMOGRAPHIC_LOCATION = "../data/demo_data.csv"
+DEMO_SHAPEFILE_LOCATION = "../data/demo_shapefile.geojson"
+GRAPH_LOCATION = "../data/graph.graphml"
 
 if __name__ == "__main__":
 
     # Read data
-    geo_df = gpd.read_file(geojson_location).to_crs({'init' : 'epsg:3687'})
+    geo_df = gpd.read_file(GEOJSON_LOCATION).to_crs({'init' : 'epsg:3687'})
     geo_df = geo_df.set_index(geo_df["CODE"])
-    demo_df = pd.read_csv(demo_location)
+    demo_df = pd.read_csv(DEMOGRAPHIC_LOCATION)
 
     # Pad code to correct length and set it to the index
     demo_df["CODE"] = demo_df["CODE"].astype(str).map(lambda x: x.zfill(7))
@@ -65,10 +65,10 @@ if __name__ == "__main__":
 
     # Write joined data to file
     try:
-        os.remove(geo_out_location)
+        os.remove(DEMO_SHAPEFILE_LOCATION)
     except OSError:
         pass
-    joined.to_file(geo_out_location, driver='GeoJSON')
+    joined.to_file(DEMO_SHAPEFILE_LOCATION, driver='GeoJSON')
 
     # Interpolate with average values
     for column in DEMO_COLUMNS:
@@ -91,11 +91,11 @@ if __name__ == "__main__":
                 edges += [(precinct_id, match_id)]
 
     try:
-        os.remove(adj_list_location)
+        os.remove(ADJ_LIST_LOCATION)
     except OSError:
         pass
 
-    pd.DataFrame(edges, columns=["source_id", "target_id"]).to_csv(adj_list_location, index=False)
+    pd.DataFrame(edges, columns=["source_id", "target_id"]).to_csv(ADJ_LIST_LOCATION, index=False)
 
     # Create graph
     distinct_precincts = list(joined["CODE"])
@@ -112,4 +112,4 @@ if __name__ == "__main__":
                 graph.vs.find(vertex_id)[column] = np.nan_to_num(value)
 
     # Write graph
-    graph.write(graph_location, format='graphml')
+    graph.write(GRAPH_LOCATION, format='graphml')
