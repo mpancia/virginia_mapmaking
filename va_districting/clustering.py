@@ -1,7 +1,6 @@
 import random
-from typing import Dict, List
+from typing import Dict, Set
 
-import attr
 import igraph
 from igraph import Graph, Vertex
 import pandas as pd
@@ -10,41 +9,80 @@ import os
 import logging
 logging.basicConfig(level=logging.INFO)
 
-# pylint: disable=E1136,E1137,E1101
+# pylint: disable=E1136,E1137,E1101,C0111,R0904
 
 geo_out_location = "../data/demo_shapefile.geojson"
 graph_location = "../data/graph.graphml"
-SAVE_LOCATION = os.environ("MAP_SAVE_LOCATION")
+SAVE_LOCATION = os.environ["MAP_SAVE_LOCATION"]
 
-@attr.s
 class Cluster(object):
-    members = attr.ib(type=List[Vertex])
-    graph = attr.ib(type=Graph)
+
+    def __init__(self, graph: Graph, members: Set[Vertex]):
+        self._members = set(members)
+        self.graph = graph
+        self._neighbors = None
+        self._total_population = None
+        self._num_components = None
+        self._needs_update = {'total_population' : True,
+                              'neighbors' : True,
+                              'num_components' : True}
+
+    @property
+    def members(self):
+        return self._members
+
+    @members.setter
+    def members(self, value):
+        self._members = set(value)
+
+    @property
+    def neighbors(self):
+        if self._needs_update['neighbors']:
+            self._neighbors = set([neighbor for member in self.members for \
+                                        neighbor in member.neighbors() \
+                                        if neighbor not in self.members])
+            self._needs_update['neighbors'] = False
+        return self._neighbors
+
+        return self._neighbors or self._get_neighbors()
+
+    @property
+    def num_components(self):
+        if self._needs_update['num_components']:
+            subgraph = self.as_subgraph()
+            self._num_components = len(subgraph.components())
+            self._needs_update['num_components'] = False
+        return self._num_components
+
+    @property
+    def total_population(self):
+        if self._needs_update['total_population']:
+            self._total_population = np.sum([vertex['population'] for\
+                                             vertex in self.members])
+            self._needs_update['total_population'] = False
+        return self._total_population
 
     def add_vertex(self, vertex):
-        self.members.append(vertex)
-        self.members = list(set(self.members))
+        if vertex not in self.members:
+            self.members = self.members.union(set([vertex]))
+            self._needs_update['total_population'] = True
+            self._needs_update['neighbors'] = True
+            self._needs_update['num_components'] = True
         return self
 
     def remove_vertex(self, vertex):
-        self.members = [member for member in self.members if member != vertex]
+        if vertex in self.members:
+            self.members = self.members.difference(set([vertex]))
+            self._needs_update['total_population'] = True
+            self._needs_update['neighbors'] = True
+            self._needs_update['num_components'] = True
         return self
-
-    def get_neighbors(self):
-        return list(set([neighbor for member in self.members for neighbor in member.neighbors() \
-                    if neighbor not in self.members]))
 
     def check_membership(self, vertex):
         return vertex in self.members
 
     def check_neighbor(self, vertex):
-        return vertex in self.get_neighbors()
-
-    def get_total_population(self):
-        return np.sum([vertex['population'] for vertex in self.members])
-
-    def as_subgraph(self):
-        return self.graph.subgraph(self.members)
+        return vertex in self.neighbors
 
     def check_disconnected_by_removal(self, vertex):
         removed_vertices = [member for member in self.members if member != vertex]
@@ -52,52 +90,121 @@ class Cluster(object):
         return len(new_subgraph.components()) > 1
 
     def check_connected(self):
-        subgraph = self.as_subgraph()
-        return len(subgraph.components()) == 1
+        return self.num_components == 1
+
+    def as_subgraph(self):
+        return self.graph.subgraph(self.members)
 
 
-@attr.s
 class Clustering(object):
-    graph = attr.ib(type=igraph.Graph)
-    clusters = attr.ib(type=Dict[int, Cluster])
+
+    def __init__(self, graph: Graph, clusters: Dict[int, Cluster]):
+        self.graph = graph
+        self.clusters = clusters
+        self._unused_vertices = None
+        self._used_vertices = None
+        self._cluster_neighbors = None
+        self._unused_cluster_neighbors = None
+        self._cluster_lookup = None
+        self._cluster_component_counts = None
+        self._cluster_sizes = None
+        self._population_variance = None
+        self._needs_update = {
+            'unused_vertices': True,
+            'used_vertices': True,
+            'cluster_neighbors': True,
+            'unused_cluster_neighbors': True,
+            'cluster_lookup': True,
+            'cluster_component_counts': True,
+            'cluster_sizes': True,
+            'population_variance': True
+        }
+
+    @property
+    def unused_vertices(self):
+        if self._needs_update['unused_vertices']:
+            all_vertices = set(list(self.graph.vs))
+            used_vertices = self.used_vertices
+            self._unused_vertices = all_vertices.difference(used_vertices)
+            self._needs_update['unused_vertices'] = False
+        return self._unused_vertices
+
+    @property
+    def used_vertices(self):
+        if self._needs_update['used_vertices']:
+            self._used_vertices = set.union(*[cluster.members for cluster in list(self.clusters.values())])
+            self._needs_update['used_vertices'] = False
+        return self._used_vertices
+
+    @property
+    def cluster_neighbors(self):
+        if self._needs_update['cluster_neighbors']:
+            self._cluster_neighbors = set.union(*[cluster.neighbors for \
+                                                  cluster in self.clusters.values()])
+            self._needs_update['cluster_neighbors'] = False
+        return self._cluster_neighbors
+
+    @property
+    def unused_cluster_neighbors(self):
+        if self._needs_update['unused_cluster_neighbors']:
+            self._unused_cluster_neighbors = self.unused_vertices.intersection(self.cluster_neighbors)
+            self._needs_update['unused_cluster_neighbors'] = False
+        return self._unused_cluster_neighbors
+
+
+    @property
+    def cluster_lookup(self):
+        if self._needs_update['cluster_lookup']:
+            self._cluster_lookup = {vertex['name'] : cluster_id for \
+                                    cluster_id, cluster in self.clusters.items() \
+                                    for vertex in cluster.members}
+            self._needs_update['cluster_lookup'] = False
+        return self._cluster_lookup
+
+    @property
+    def cluster_component_counts(self):
+        if self._needs_update['cluster_component_counts']:
+            self._cluster_component_counts = {id: cluster.num_components for
+                    id, cluster in list(self.clusters.items())}
+            self._needs_update['cluster_component_counts'] = False
+        return self._cluster_component_counts
+
+    @property
+    def cluster_sizes(self):
+        if self._needs_update['cluster_sizes']:
+            self._cluster_sizes = {id: cluster.total_population for \
+                                   id, cluster in list(self.clusters.items())}
+            self._needs_update['cluster_sizes'] = False
+        return self._cluster_sizes
+
+    @property
+    def population_variance(self):
+        if self._needs_update['population_variance']:
+            population_sizes = self.cluster_sizes.values()
+            smallest_size = min(population_sizes)
+            largest_size = max(population_sizes)
+            self._population_variance = abs(largest_size - smallest_size) / smallest_size
+            self._needs_update['population_variance'] = False
+        return self._population_variance
 
     def add_vertex_to_cluster_by_id(self, cluster_id: int, vertex: Vertex):
         self.clusters[cluster_id] = self.clusters[cluster_id].add_vertex(vertex)
+        self._needs_update = dict.fromkeys(self._needs_update, True)
         return self
 
     def remove_vertex_from_cluster_by_id(self, cluster_id: int, vertex: Vertex):
         self.clusters[cluster_id] = self.clusters[cluster_id].remove_vertex(vertex)
+        self._needs_update = dict.fromkeys(self._needs_update, True)
         return self
 
     def get_cluster_neighbors_by_id(self, cluster_id: int):
-        return self.clusters[cluster_id].get_neighbors()
+        return self.clusters[cluster_id].neighbors
 
-    def get_all_cluster_neighbors(self):
-        return [neighbor for cluster_id in self.clusters.keys() \
-                for neighbor in self.get_cluster_neighbors_by_id(cluster_id)]
-
-    def get_used_vertices(self):
-        return set([member for cluster in list(self.clusters.values()) for member in cluster.members])
-
-    def get_unused_vertices(self):
-        used_vertices = self.get_used_vertices()
-        all_vertices = set(self.graph.vs)
-        return list(all_vertices.difference(used_vertices))
-
-    def get_cluster_lookup(self):
-        return {vertex['name'] : cluster_id for cluster_id, cluster in self.clusters.items() \
-                for vertex in cluster.members}
 
     def label_geo_data(self, geo_data):
-        cluster_lookup = self.get_cluster_lookup()
-        cluster_df = pd.DataFrame.from_dict(cluster_lookup, orient='index')
+        cluster_df = pd.DataFrame.from_dict(self.cluster_lookup, orient='index')
         cluster_df.columns = ['cluster']
         return geo_data.join(cluster_df)
-
-    def get_all_unused_cluster_neighbors(self):
-        unused_vertices = set(self.get_unused_vertices())
-        cluster_neighbors = set(self.get_all_cluster_neighbors())
-        return list(unused_vertices.intersection(cluster_neighbors))
 
     def find_cluster_for_vertex(self, vertex: Vertex):
         cluster_ids = [cluster_id for cluster_id in self.clusters.keys() \
@@ -112,13 +219,12 @@ class Clustering(object):
                        if self.clusters[cluster_id].check_neighbor(vertex)]
         if len(cluster_ids) > 0:
             return cluster_ids
-        else:
-            return None
 
+        return None
 
     def add_random_neighbor_to_cluster(self, cluster_id: int):
-        neighbors = set(self.get_cluster_neighbors_by_id(cluster_id))
-        unused_vertices = set(self.get_unused_vertices())
+        neighbors = self.get_cluster_neighbors_by_id(cluster_id)
+        unused_vertices = self.unused_vertices
         unused_neighbors = neighbors.intersection(unused_vertices)
         if len(unused_neighbors) > 0:
             vertex_to_add = random.choice(list(unused_neighbors))
@@ -140,12 +246,8 @@ class Clustering(object):
                                              vertex=vertex_to_add)
         return self
 
-    def get_cluster_sizes(self):
-        return [(cluster_id, self.clusters[cluster_id].get_total_population()) for\
-                               cluster_id in self.clusters.keys()]
-
     def get_smallest_cluster_id(self):
-        cluster_populations = self.get_cluster_sizes()
+        cluster_populations = list(self.cluster_sizes.items())
         cluster_populations.sort(key=lambda x: - x[1])
         smallest_cluster_id = cluster_populations.pop()[0]
         return smallest_cluster_id
@@ -155,38 +257,22 @@ class Clustering(object):
         return self.add_random_neighbor_to_cluster(smallest_cluster_id)
 
     def grow_to_min_size(self, min_size):
-        while min([x[1] for x in self.get_cluster_sizes()]) < min_size:
+        while min([x for x in list(self.cluster_sizes.values())]) < min_size:
             self.grow_smallest_cluster()
         return self
 
-    def get_current_population_variance(self):
-        population_sizes = [x[1] for x in self.get_cluster_sizes()]
-        smallest_size = min(population_sizes)
-        largest_size = max(population_sizes)
-        return abs(largest_size - smallest_size) / smallest_size
-
     def add_unused_neighbor(self):
-        unused_neighbors = self.get_all_unused_cluster_neighbors()
-        vertex = random.choice(unused_neighbors)
+        vertex = random.choice(list(self.unused_cluster_neighbors))
         vertex_neighbors = self.find_neighbor_for_vertex(vertex)
         cluster_to_add_to = random.choice(vertex_neighbors)
         return self.add_vertex_to_cluster_by_id(cluster_to_add_to, vertex)
-
-    def get_disconnected_component_count(self):
-        disconnectivities = [not cluster.check_connected() \
-                             for cluster in self.clusters.values()]
-        return sum(disconnectivities)
-
-    def check_connected(self):
-        disconnectivities = self.get_disconnected_component_count()
-        return disconnectivities == 0
 
     @classmethod
     def from_random_vertices(cls, seed_graph: Graph, num_clusters: int):
         """ Generate a clustering by picking a random set of vertices.
         """
         random_vertices = random.sample(list(seed_graph.vs), num_clusters)
-        clusters = [Cluster([vertex], seed_graph) for vertex in random_vertices]
+        clusters = [Cluster(graph=seed_graph, members=set([vertex])) for vertex in random_vertices]
         return cls(seed_graph, {i : cluster for i, cluster in enumerate(clusters)})
 
 if __name__ == "__main__":
@@ -205,21 +291,22 @@ if __name__ == "__main__":
         except:
             logging.error('Generating min size failed.')
             return generate_map(component)
-        unused_vertices = len(clustering.get_unused_vertices())
+
+        unused_vertices = len(clustering.unused_vertices)
         while unused_vertices > 0:
             try:
                 clustering = clustering.add_unused_neighbor()
-                unused_vertices = len(clustering.get_unused_vertices())
+                unused_vertices = len(clustering.unused_vertices)
             except:
                 logging.error('Remainder allocation failed with {} unused vertices.'.format(unused_vertices))
                 return generate_map(component)
 
-        unused_vertices = len(clustering.get_unused_vertices())
+        unused_vertices = len(clustering.unused_vertices)
         if unused_vertices > 0:
             logging.error('Remainder allocation failed with {} unused vertices.'.format(unused_vertices))
             return generate_map(component)
 
-        variance = clustering.get_current_population_variance()
+        variance = clustering.population_variance
 
         if variance > 15:
             logging.error('Pop variance too high: {}'.format(variance))
@@ -236,7 +323,7 @@ if __name__ == "__main__":
 
     for i in range(10):
         clustering, variance = generate_map(large_component)
-        disconnected_count = clustering.get_disconnected_component_count()
+        disconnected_count = np.sum([x for x in clustering.cluster_component_counts.values() if x > 1])
         labeled_df = clustering.label_geo_data(geo_df)
         labeled_df = labeled_df.fillna({'cluster' : 99})
         labeled_df['geometry'] = labeled_df.buffer(0)
