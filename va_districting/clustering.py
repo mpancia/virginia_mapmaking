@@ -1,6 +1,6 @@
 import random
 from typing import Dict, Set
-
+from collections import Counter
 import igraph
 from igraph import Graph, Vertex
 import pandas as pd
@@ -139,8 +139,10 @@ class Clustering(object):
     @property
     def cluster_neighbors(self):
         if self._needs_update['cluster_neighbors']:
-            self._cluster_neighbors = set.union(*[cluster.neighbors for \
-                                                  cluster in self.clusters.values()])
+            vertex_dicts = [{neighbor : cluster_id for neighbor in list(cluster.neighbors)} for cluster_id, cluster in list(self.clusters.items())]
+            keys = {k for d in vertex_dicts for k in d}
+            merged_dict = {k: set([d.get(k, None) for d in vertex_dicts if d.get(k, None)]) for k in keys}
+            self._cluster_neighbors = merged_dict
             self._needs_update['cluster_neighbors'] = False
         return self._cluster_neighbors
 
@@ -286,8 +288,9 @@ if __name__ == "__main__":
 
     def generate_map(component):
         clustering = Clustering.from_random_vertices(component, 99)
+        import ipdb; ipdb.set_trace()  # XXX BREAKPOINT
         try:
-            clustering = clustering.grow_to_min_size(20000)
+            clustering = clustering.grow_to_min_size(30000)
         except:
             logging.error('Generating min size failed.')
             return generate_map(component)
@@ -306,6 +309,11 @@ if __name__ == "__main__":
             logging.error('Remainder allocation failed with {} unused vertices.'.format(unused_vertices))
             return generate_map(component)
 
+        disconnected_count = np.sum([x for x in clustering.cluster_component_counts.values() if x > 1])
+        if disconnected_count > 0:
+            logging.error('{} disconnected components.'.format(disconnected_count))
+            return generate_map(component)
+
         variance = clustering.population_variance
 
         if variance > 15:
@@ -316,10 +324,11 @@ if __name__ == "__main__":
 
     geo_df = gpd.read_file(geo_out_location).to_crs({'init' : 'epsg:3687'}).set_index('CODE')
     manifest_path = os.path.join(SAVE_LOCATION, 'manifest.csv')
-    row = ['path', 'variance', 'disconnected_components']
-    with open(manifest_path, "w") as file:
-        writer = csv.writer(file)
-        writer.writerow(row)
+    if not os.path.exists(manifest_path):
+        row = ['path', 'variance', 'disconnected_components']
+        with open(manifest_path, "w") as file:
+            writer = csv.writer(file)
+            writer.writerow(row)
 
     for i in range(10):
         clustering, variance = generate_map(large_component)
