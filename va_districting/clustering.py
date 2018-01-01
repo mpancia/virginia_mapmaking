@@ -1,22 +1,27 @@
-import random
-from typing import Dict, Set
-from collections import Counter
-import igraph
-from igraph import Graph, Vertex
-import pandas as pd
-import numpy as np
+"""Classes for generating maps as clusters in precinct adjacency graph."""
 import os
+import random
 import logging
+
+from typing import Dict, Set
+
+import igraph
+import numpy as np
+import pandas as pd
+
+from igraph import Graph, Vertex
+
+from parse_data import DEMO_SHAPEFILE_LOCATION, GRAPH_LOCATION
+
 logging.basicConfig(level=logging.INFO)
 
 # pylint: disable=E1136,E1137,E1101,C0111,R0904
 
-geo_out_location = "../data/demo_shapefile.geojson"
-graph_location = "../data/graph.graphml"
-SAVE_LOCATION = os.environ["MAP_SAVE_LOCATION"]
+
+SAVE_LOCATION = os.environ.get("MAP_SAVE_LOCATION")
 
 class Cluster(object):
-
+    """A Class to represent clusters."""
     def __init__(self, graph: Graph, members: Set[Vertex]):
         self._members = set(members)
         self.graph = graph
@@ -43,8 +48,6 @@ class Cluster(object):
                                         if neighbor not in self.members])
             self._needs_update['neighbors'] = False
         return self._neighbors
-
-        return self._neighbors or self._get_neighbors()
 
     @property
     def num_components(self):
@@ -85,9 +88,12 @@ class Cluster(object):
         return vertex in self.neighbors
 
     def check_disconnected_by_removal(self, vertex):
-        removed_vertices = [member for member in self.members if member != vertex]
-        new_subgraph = self.graph.subgraph(removed_vertices)
-        return len(new_subgraph.components()) > 1
+        if vertex in self.members:
+            removed_vertices = [member for member in self.members if member != vertex]
+            new_subgraph = self.graph.subgraph(removed_vertices)
+            return len(new_subgraph.components()) > 1
+        else:
+            return False
 
     def check_connected(self):
         return self.num_components == 1
@@ -278,11 +284,13 @@ class Clustering(object):
         return cls(seed_graph, {i : cluster for i, cluster in enumerate(clusters)})
 
 if __name__ == "__main__":
+    import csv
+    import uuid
+
     import geopandas as gpd
     import matplotlib.pyplot as plt
-    import uuid
-    import csv
-    graph = igraph.read(graph_location, format='graphml')
+
+    graph = igraph.read(GRAPH_LOCATION, format='graphml')
     large_component = graph.subgraph(graph.components()[0])
     total_large_population = np.sum(list(large_component.vs['population']))
 
@@ -322,7 +330,7 @@ if __name__ == "__main__":
         else:
             return clustering, variance
 
-    geo_df = gpd.read_file(geo_out_location).to_crs({'init' : 'epsg:3687'}).set_index('CODE')
+    geo_df = gpd.read_file(DEMO_SHAPEFILE_LOCATION).to_crs({'init' : 'epsg:3687'}).set_index('CODE')
     manifest_path = os.path.join(SAVE_LOCATION, 'manifest.csv')
     if not os.path.exists(manifest_path):
         row = ['path', 'variance', 'disconnected_components']
