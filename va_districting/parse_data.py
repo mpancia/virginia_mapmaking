@@ -15,6 +15,17 @@ DEMOGRAPHIC_LOCATION = "../data/demo_data.csv"
 DEMO_SHAPEFILE_LOCATION = "../data/demo_shapefile.geojson"
 GRAPH_LOCATION = "../data/graph.graphml"
 
+POLITICAL_COMPETITION_COLUMNS = [
+        'surveyed_democrat_percentage',
+        'surveyed_independent_green_percentage',
+        'surveyed_independent_percentage',
+        'surveyed_republican_percentage',
+        'surveyed_blank_percentage',
+        'surveyed_libertarian_percentage',
+        'surveyed_total']
+POPULATION_COLUMNS = ['population']
+DEMO_COLUMNS = POLITICAL_COMPETITION_COLUMNS + POPULATION_COLUMNS
+
 if __name__ == "__main__":
 
     # Read data
@@ -45,20 +56,10 @@ if __name__ == "__main__":
                ))
 
     # Select wanted columns
-    DEMO_COLUMNS = [
-        'population',
-        'surveyed_democrat_percentage',
-        'surveyed_independent_green_percentage',
-        'surveyed_independent_percentage',
-        'surveyed_republican_percentage',
-        'surveyed_blank_percentage',
-        'surveyed_libertarian_percentage',
-        'surveyed_total'
-    ]
     demo_df = demo_df[DEMO_COLUMNS]
 
     # Fill NaN with 0 for survey responses
-    demo_df = demo_df.fillna(value={column: 0 for column in DEMO_COLUMNS if column != 'population'})
+    demo_df = demo_df.fillna(value={column: 0 for column in POLITICAL_COMPETITION_COLUMNS})
 
     # Join with geo data
     joined = geo_df.join(demo_df)

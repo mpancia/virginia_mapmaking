@@ -8,10 +8,10 @@ from typing import Dict, Set
 import igraph
 import numpy as np
 import pandas as pd
-
+from collections import defaultdict
 from igraph import Graph, Vertex
-
-from parse_data import DEMO_SHAPEFILE_LOCATION, GRAPH_LOCATION
+from scipy.stats import entropy
+from parse_data import DEMO_SHAPEFILE_LOCATION, GRAPH_LOCATION, POLITICAL_COMPETITION_COLUMNS
 
 logging.basicConfig(level=logging.INFO)
 
@@ -28,9 +28,11 @@ class Cluster(object):
         self._neighbors = None
         self._total_population = None
         self._num_components = None
+        self._political_competition = None
         self._needs_update = {'total_population' : True,
                               'neighbors' : True,
-                              'num_components' : True}
+                              'num_components' : True,
+                              'political_competition': True}
 
     @property
     def members(self):
@@ -64,6 +66,18 @@ class Cluster(object):
                                              vertex in self.members])
             self._needs_update['total_population'] = False
         return self._total_population
+
+    @property
+    def political_competition(self):
+        if self._needs_update['political_competition']:
+            party_pop_dict = defaultdict(float)
+            for party_column in POLITICAL_COMPETITION_COLUMNS:
+                for vertex in self.members:
+                    party_pop_dict[party_column] += vertex[party_column] * vertex['population']
+            party_distribution = np.array(list(party_pop_dict.values())) / self.total_population
+            self._political_competition = entropy(party_distribution)
+            self._needs_update['political_competition'] = False
+        return self._political_competition
 
     def add_vertex(self, vertex):
         if vertex not in self.members:
@@ -115,6 +129,7 @@ class Clustering(object):
         self._cluster_component_counts = None
         self._cluster_sizes = None
         self._population_variance = None
+        self._political_competition = None
         self._needs_update = {
             'unused_vertices': True,
             'used_vertices': True,
@@ -123,7 +138,8 @@ class Clustering(object):
             'cluster_lookup': True,
             'cluster_component_counts': True,
             'cluster_sizes': True,
-            'population_variance': True
+            'population_variance': True,
+            'political_competition': True
         }
 
     @property
@@ -147,7 +163,7 @@ class Clustering(object):
         if self._needs_update['cluster_neighbors']:
             vertex_dicts = [{neighbor : cluster_id for neighbor in list(cluster.neighbors)} for cluster_id, cluster in list(self.clusters.items())]
             keys = {k for d in vertex_dicts for k in d}
-            merged_dict = {k: set([d.get(k, None) for d in vertex_dicts if d.get(k, None)]) for k in keys}
+            merged_dict = {k: set([d.get(k, None) for d in vertex_dicts if d.get(k, None) is not None]) for k in keys}
             self._cluster_neighbors = merged_dict
             self._needs_update['cluster_neighbors'] = False
         return self._cluster_neighbors
@@ -194,6 +210,13 @@ class Clustering(object):
             self._population_variance = abs(largest_size - smallest_size) / smallest_size
             self._needs_update['population_variance'] = False
         return self._population_variance
+
+    @property
+    def political_competition(self):
+        if self._needs_update['political_competition']:
+            cluster_competitions = [cluster.political_competition for cluster in self.clusters.values()]
+            self._political_competition = np.mean([comp for comp in cluster_competitions if np.isfinite(comp)])
+        return self._political_competition
 
     def add_vertex_to_cluster_by_id(self, cluster_id: int, vertex: Vertex):
         self.clusters[cluster_id] = self.clusters[cluster_id].add_vertex(vertex)
@@ -296,7 +319,6 @@ if __name__ == "__main__":
 
     def generate_map(component):
         clustering = Clustering.from_random_vertices(component, 99)
-        import ipdb; ipdb.set_trace()  # XXX BREAKPOINT
         try:
             clustering = clustering.grow_to_min_size(30000)
         except:
