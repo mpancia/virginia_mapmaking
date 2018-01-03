@@ -1,24 +1,26 @@
 """Classes for generating maps as clusters in precinct adjacency graph."""
 import os
+import uuid
+import pickle
+import csv
 import random
 import logging
+import itertools
 
 from typing import Dict, Set
+from collections import defaultdict
 
 import igraph
 import numpy as np
 import pandas as pd
-from collections import defaultdict
+
 from igraph import Graph, Vertex
 from scipy.stats import entropy
-from parse_data import DEMO_SHAPEFILE_LOCATION, GRAPH_LOCATION, POLITICAL_COMPETITION_COLUMNS
 
-logging.basicConfig(level=logging.INFO)
+from parse_data import (GRAPH_LOCATION,
+                        POLITICAL_COMPETITION_COLUMNS)
 
 # pylint: disable=E1136,E1137,E1101,C0111,R0904
-
-
-SAVE_LOCATION = os.environ.get("MAP_SAVE_LOCATION")
 
 class Cluster(object):
     """A Class to represent clusters."""
@@ -28,11 +30,13 @@ class Cluster(object):
         self._neighbors = None
         self._total_population = None
         self._num_components = None
-        self._political_competition = None
+        self._political_entropy = None
+        self._competitiveness = None
         self._needs_update = {'total_population' : True,
                               'neighbors' : True,
                               'num_components' : True,
-                              'political_competition': True}
+                              'political_entropy': True,
+                              'competitiveness': True}
 
     @property
     def members(self):
@@ -68,16 +72,27 @@ class Cluster(object):
         return self._total_population
 
     @property
-    def political_competition(self):
-        if self._needs_update['political_competition']:
+    def political_entropy(self):
+        if self._needs_update['political_entropy']:
             party_pop_dict = defaultdict(float)
-            for party_column in POLITICAL_COMPETITION_COLUMNS:
+            party_columns = [col for col in POLITICAL_COMPETITION_COLUMNS if col != 'surveyed_total']
+            party_columns = [col for col in party_columns if col != 'surveyed_blank_percentage']
+            for party_column in party_columns:
                 for vertex in self.members:
                     party_pop_dict[party_column] += vertex[party_column] * vertex['population']
-            party_distribution = np.array(list(party_pop_dict.values())) / self.total_population
-            self._political_competition = entropy(party_distribution)
-            self._needs_update['political_competition'] = False
+            party_counts = np.array(list(party_pop_dict.values()))
+            self._political_competition = entropy(party_counts)
+            self._needs_update['political_entropy'] = False
         return self._political_competition
+
+    @property
+    def competitiveness(self):
+        if self._needs_update['competitiveness']:
+            total_republicans = np.sum([vertex['surveyed_republican_percentage']*vertex['population'] for vertex in self.members])
+            total_democrats = np.sum([vertex['surveyed_democrat_percentage']*vertex['population'] for vertex in self.members])
+            self._competitiveness = np.min([total_democrats, total_republicans]) / np.max([total_democrats, total_republicans])
+            self._needs_update['competitiveness'] = False
+        return self._competitiveness
 
     def add_vertex(self, vertex):
         if vertex not in self.members:
@@ -129,7 +144,8 @@ class Clustering(object):
         self._cluster_component_counts = None
         self._cluster_sizes = None
         self._population_variance = None
-        self._political_competition = None
+        self._population_energy = None
+        self._political_entropy = None
         self._needs_update = {
             'unused_vertices': True,
             'used_vertices': True,
@@ -139,8 +155,9 @@ class Clustering(object):
             'cluster_component_counts': True,
             'cluster_sizes': True,
             'population_variance': True,
-            'political_competition': True
+            'political_entropy': True
         }
+        self.stub = str(uuid.uuid4())
 
     @property
     def unused_vertices(self):
@@ -204,19 +221,30 @@ class Clustering(object):
     @property
     def population_variance(self):
         if self._needs_update['population_variance']:
-            population_sizes = self.cluster_sizes.values()
-            smallest_size = min(population_sizes)
-            largest_size = max(population_sizes)
-            self._population_variance = abs(largest_size - smallest_size) / smallest_size
+            population_sizes = np.array(list(self.cluster_sizes.values()))
+            avg_population_size = np.mean(population_sizes)
+            pop_variations = population_sizes/avg_population_size - 1
+            self._population_energy = np.std(pop_variations)
+            self._population_variance = np.max(np.abs(pop_variations))
             self._needs_update['population_variance'] = False
         return self._population_variance
 
     @property
-    def political_competition(self):
-        if self._needs_update['political_competition']:
-            cluster_competitions = [cluster.political_competition for cluster in self.clusters.values()]
-            self._political_competition = np.mean([comp for comp in cluster_competitions if np.isfinite(comp)])
-        return self._political_competition
+    def population_energy(self):
+        population_variance = self.population_variance
+        return self._population_energy
+
+    @property
+    def political_entropy(self):
+        if self._needs_update['political_entropy']:
+            cluster_entropies = [cluster.political_entropy for cluster in self.clusters.values()]
+            self._political_entropy = np.std([comp for comp in cluster_entropies if np.isfinite(comp)])
+            self._needs_update['political_entropy'] = False
+        return self._political_entropy
+
+    def num_competitive_districts(self):
+        competitive_districts = [x for x in self.clusters.values() if x.competitiveness > .8]
+        return len(competitive_districts)
 
     def add_vertex_to_cluster_by_id(self, cluster_id: int, vertex: Vertex):
         self.clusters[cluster_id] = self.clusters[cluster_id].add_vertex(vertex)
@@ -298,6 +326,46 @@ class Clustering(object):
         cluster_to_add_to = random.choice(vertex_neighbors)
         return self.add_vertex_to_cluster_by_id(cluster_to_add_to, vertex)
 
+    def save(self, location):
+        graph_path = os.path.join(location, self.stub) + '.graph'
+        self.graph.write_picklez(graph_path)
+        lookup_path = os.path.join(location, self.stub) + '.clusters'
+        with open(lookup_path, 'wb') as f:
+            pickle.dump(self.cluster_lookup, f)
+        return self
+
+    def copy(self):
+        cluster_lookup = [(self.graph.vs.find(id), cluster_id) for id, cluster_id in self.cluster_lookup.items()]
+        cluster_groups = itertools.groupby(cluster_lookup, lambda x: x[1])
+        clusters = {id : Cluster(graph=self.graph, members=set([x[0] for x in members])) for id, members in cluster_groups}
+        return Clustering(graph=self.graph, clusters=clusters)
+
+    def save_shapefile(self, geo_data, save_location):
+        manifest_path = os.path.join(save_location, 'manifest.csv')
+        if not os.path.exists(manifest_path):
+            row = ['path', 'variance', 'disconnected_components', 'competitive_districts']
+            with open(manifest_path, "w") as file:
+                writer = csv.writer(file)
+                writer.writerow(row)
+
+        logging.info('Written to {}'.format(save_location))
+        disconnected_count = np.sum([x for x in self.cluster_component_counts.values() if x > 1])
+        row = [self.stub + '.geojson', self.population_variance, disconnected_count, self.num_competitive_districts()]
+        with open(manifest_path, "a") as file:
+            writer = csv.writer(file)
+            writer.writerow(row)
+        shp_location = os.path.join(save_location, self.stub + '.geojson')
+        try:
+            os.remove(shp_location)
+        except OSError:
+            pass
+        labeled_df = self.label_geo_data(geo_data)
+        labeled_df = labeled_df.fillna({'cluster' : 99})
+        labeled_df['geometry'] = labeled_df.buffer(0)
+        labeled_df.to_file(shp_location, driver="GeoJSON")
+
+
+
     @classmethod
     def from_random_vertices(cls, seed_graph: Graph, num_clusters: int):
         """ Generate a clustering by picking a random set of vertices.
@@ -306,16 +374,28 @@ class Clustering(object):
         clusters = [Cluster(graph=seed_graph, members=set([vertex])) for vertex in random_vertices]
         return cls(seed_graph, {i : cluster for i, cluster in enumerate(clusters)})
 
+    @classmethod
+    def load(cls, location):
+        graph_path = location + '.graph'
+        graph = Graph.Read_Picklez(graph_path)
+        lookup_path = location + '.clusters'
+        with open(lookup_path, 'rb') as f:
+            id_cluster_lookup = pickle.load(f)
+        cluster_lookup = [(graph.vs.find(id), cluster_id) for id, cluster_id in id_cluster_lookup.items()]
+        cluster_groups = itertools.groupby(cluster_lookup, lambda x: x[1])
+        clusters = {id : Cluster(graph=graph, members=set([x[0] for x in members])) for id, members in cluster_groups}
+        return cls(graph=graph, clusters=clusters)
+
 if __name__ == "__main__":
     import csv
-    import uuid
 
-    import geopandas as gpd
-    import matplotlib.pyplot as plt
+    from pathlib import Path
+
+    NUM_TO_GENERATE = 10
+    logging.basicConfig(level=logging.INFO)
 
     graph = igraph.read(GRAPH_LOCATION, format='graphml')
     large_component = graph.subgraph(graph.components()[0])
-    total_large_population = np.sum(list(large_component.vs['population']))
 
     def generate_map(component):
         clustering = Clustering.from_random_vertices(component, 99)
@@ -344,48 +424,13 @@ if __name__ == "__main__":
             logging.error('{} disconnected components.'.format(disconnected_count))
             return generate_map(component)
 
-        variance = clustering.population_variance
-
-        if variance > 15:
-            logging.error('Pop variance too high: {}'.format(variance))
+        if clustering.population_variance > 5:
+            logging.error('Pop variance too high: {}'.format(clustering.population_variance))
             return generate_map(component)
         else:
-            return clustering, variance
+            return clustering
 
-    geo_df = gpd.read_file(DEMO_SHAPEFILE_LOCATION).to_crs({'init' : 'epsg:3687'}).set_index('CODE')
-    manifest_path = os.path.join(SAVE_LOCATION, 'manifest.csv')
-    if not os.path.exists(manifest_path):
-        row = ['path', 'variance', 'disconnected_components']
-        with open(manifest_path, "w") as file:
-            writer = csv.writer(file)
-            writer.writerow(row)
-
-    for i in range(10):
-        clustering, variance = generate_map(large_component)
-        disconnected_count = np.sum([x for x in clustering.cluster_component_counts.values() if x > 1])
-        labeled_df = clustering.label_geo_data(geo_df)
-        labeled_df = labeled_df.fillna({'cluster' : 99})
-        labeled_df['geometry'] = labeled_df.buffer(0)
-
-        logging.info('Generated map with {} disconnected components and {} population variance.'.format(disconnected_count, variance))
-
-        stub = str(uuid.uuid4())
-        write_path = os.path.join(SAVE_LOCATION, stub + '.geojson')
-        logging.info('Written to {}'.format(write_path))
-        row = [stub + '.geojson', variance, disconnected_count]
-        with open(manifest_path, "a") as file:
-            writer = csv.writer(file)
-            writer.writerow(row)
-
-        try:
-            os.remove(write_path)
-        except OSError:
-            pass
-        labeled_df.to_file(write_path, driver="GeoJSON")
-
-    # dissolved_df = geo_df.dissolve(by='cluster').reset_index()
-    # dissolved_df['coords'] = dissolved_df['geometry'].apply(lambda x: x.representative_point().coords[:])
-    # dissolved_df['coords'] = [coords[0] for coords in dissolved_df['coords']]
-    # ax = dissolved_df.plot(column='cluster')
-    # for dx, row in dissolved_df.iterrows():
-    #     plt.annotate(s=int(row['cluster']), xy=row['coords'], horizontalalignment='center')
+    for i in range(NUM_TO_GENERATE):
+        clustering = generate_map(large_component)
+        logging.info('Generated map with {} population variance.'.format(clustering.population_variance))
+        clustering.save(str(Path('../seed_maps').resolve()))
