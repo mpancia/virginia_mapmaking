@@ -18,14 +18,17 @@ class NeighborSampling(object):
         self.β = 1
         self.best_variance_districts = [initial_clustering]
         self.best_comp_districts = [initial_clustering]
+        self.best_racial_districts = [initial_clustering]
         self.min_variance = initial_clustering.population_variance
         self.most_comp_districts = initial_clustering.num_competitive_districts()
+        self.lowest_racial_dissimilarity = initial_clustering.racial_dissimilarity
 
     @staticmethod
     def calculate_energy(clustering: Clustering, β: float):
         political_energy = 1/ clustering.political_entropy
         population_energy = clustering.population_variance
-        total_energy = np.exp(-β*(political_energy + population_energy))
+        racial_energy = clustering.racial_dissimilarity
+        total_energy = np.exp(-β*(political_energy + population_energy + racial_energy))
         return total_energy
 
     @staticmethod
@@ -62,15 +65,21 @@ class NeighborSampling(object):
                 self.sampled_neighbors.append(candidate)
                 population_variance = candidate.population_variance
                 competitive_districts = candidate.num_competitive_districts()
+                dissimilarity = candidate.racial_dissimilarity
                 if (competitive_districts >= self.most_comp_districts) and (not is_disconnected):
                     self.most_comp_districts = competitive_districts
                     self.best_comp_districts.append(candidate)
                     self.best_comp_districts = self.best_comp_districts[::-1][:10][::-1]
+                if (dissimilarity <= self.lowest_racial_dissimilarity) and (not is_disconnected):
+                    self.lowest_racial_dissimilarity = dissimilarity
+                    self.best_racial_districts.append(candidate)
+                    self.best_racial_districts = self.best_racial_districts[::-1][:10][::-1]
                 if (population_variance <= self.min_variance) and (not is_disconnected):
                     self.min_variance = population_variance
                     self.best_variance_districts.append(candidate)
                     self.best_variance_districts = self.best_variance_districts[::-1][:10][::-1]
-                logging.info("Accepted sample with energy {:.2e}, acceptance ratio {:.2e}, population variance {:.2e}, comp districts {}".format(candidate_energy, acceptance_ratio, population_variance, competitive_districts))
+                logging.info("Accepted sample with energy {:.2e}, acceptance ratio {:.2e}, population variance {:.2e}, comp districts {}, dissimilarity index {}"\
+                             .format(candidate_energy, acceptance_ratio, population_variance, competitive_districts, dissimilarity))
             else:
                 logging.info("Rejected sample with energy {:.2e} and acceptance ratio {:.2e}".format(candidate_energy, acceptance_ratio))
 
@@ -91,7 +100,7 @@ if __name__ == '__main__':
     initial_clusterings = [Clustering.load(os.path.join(LOAD_LOCATION, stub)) for stub in stubs]
     for clustering in initial_clusterings:
         sampling = NeighborSampling(clustering)
-        for i in tqdm(range(5000)):
+        for i in tqdm(range(10000)):
             sampling.find_acceptable_neighbor()
             if i % 1000 == 0:
                 logging.info("Lowering temperature.")

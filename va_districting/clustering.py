@@ -32,11 +32,13 @@ class Cluster(object):
         self._num_components = None
         self._political_entropy = None
         self._competitiveness = None
+        self._racial_difference = None
         self._needs_update = {'total_population' : True,
                               'neighbors' : True,
                               'num_components' : True,
                               'political_entropy': True,
-                              'competitiveness': True}
+                              'competitiveness': True,
+                              'racial_difference' : True}
 
     @property
     def members(self):
@@ -94,6 +96,16 @@ class Cluster(object):
             self._needs_update['competitiveness'] = False
         return self._competitiveness
 
+
+    @property
+    def racial_difference(self):
+        if self._needs_update['racial_difference']:
+            total_white = np.sum([vertex['demo_white_percentage']*vertex['population'] for vertex in self.members])
+            total_black = np.sum([vertex['demo_black_percentage']*vertex['population'] for vertex in self.members])
+            self._racial_difference = {'total_white' : total_white, 'total_black' : total_black}
+            self._needs_update['racial_difference'] = False
+        return self._racial_difference
+
     def add_vertex(self, vertex):
         if vertex not in self.members:
             self.members = self.members.union(set([vertex]))
@@ -146,6 +158,7 @@ class Clustering(object):
         self._population_variance = None
         self._population_energy = None
         self._political_entropy = None
+        self._racial_dissimilarity = None
         self._needs_update = {
             'unused_vertices': True,
             'used_vertices': True,
@@ -155,7 +168,8 @@ class Clustering(object):
             'cluster_component_counts': True,
             'cluster_sizes': True,
             'population_variance': True,
-            'political_entropy': True
+            'political_entropy': True,
+            'racial_dissimilarity': True
         }
         self.stub = str(uuid.uuid4())
 
@@ -233,6 +247,18 @@ class Clustering(object):
     def population_energy(self):
         population_variance = self.population_variance
         return self._population_energy
+
+    @property
+    def racial_dissimilarity(self):
+        if self._needs_update['racial_dissimilarity']:
+            cluster_differences = [cluster.racial_difference for cluster in self.clusters.values()]
+            total_black_pop = np.sum([difference['total_black'] for difference in cluster_differences])
+            total_white_pop = np.sum([difference['total_white'] for difference in cluster_differences])
+            cluster_dissims = [difference['total_white'] / total_white_pop - difference['total_black'] / total_black_pop \
+                               for difference in cluster_differences]
+            self._racial_dissimilarity = np.sum(np.abs(cluster_dissims)) * 0.5
+            self._needs_update['racial_dissimilarity'] = False
+        return self._racial_dissimilarity
 
     @property
     def political_entropy(self):
@@ -343,14 +369,14 @@ class Clustering(object):
     def save_shapefile(self, geo_data, save_location):
         manifest_path = os.path.join(save_location, 'manifest.csv')
         if not os.path.exists(manifest_path):
-            row = ['path', 'variance', 'disconnected_components', 'competitive_districts']
+            row = ['path', 'variance', 'disconnected_components', 'competitive_districts', 'racial_dissimilarity']
             with open(manifest_path, "w") as file:
                 writer = csv.writer(file)
                 writer.writerow(row)
 
         logging.info('Written to {}'.format(save_location))
         disconnected_count = np.sum([x for x in self.cluster_component_counts.values() if x > 1])
-        row = [self.stub + '.geojson', self.population_variance, disconnected_count, self.num_competitive_districts()]
+        row = [self.stub + '.geojson', self.population_variance, disconnected_count, self.num_competitive_districts(), self.racial_dissimilarity]
         with open(manifest_path, "a") as file:
             writer = csv.writer(file)
             writer.writerow(row)

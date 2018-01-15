@@ -23,8 +23,22 @@ POLITICAL_COMPETITION_COLUMNS = [
         'surveyed_blank_percentage',
         'surveyed_libertarian_percentage',
         'surveyed_total']
+
+RACIAL_DEMOGRAPHIC_COLUMNS = [
+        'demo_total_population',
+        'demo_white_percentage',
+        'demo_black_percentage',
+        'demo_indian_percentage',
+        'demo_asian_percentage',
+        'demo_hawaii_percentage',
+        'demo_other_percentage'
+]
+
 POPULATION_COLUMNS = ['population']
-DEMO_COLUMNS = POLITICAL_COMPETITION_COLUMNS + POPULATION_COLUMNS
+
+DEMO_COLUMNS = POLITICAL_COMPETITION_COLUMNS + \
+    POPULATION_COLUMNS + \
+    RACIAL_DEMOGRAPHIC_COLUMNS
 
 if __name__ == "__main__":
 
@@ -45,14 +59,27 @@ if __name__ == "__main__":
                    'Libertarian' : 'surveyed_libertarian',
                    'Republican' : 'surveyed_republican',
                    'Grand Total' : 'surveyed_total',
-                   '(blank)' : 'surveyed_blank'})
+                   '(blank)' : 'surveyed_blank',
+                   '18+_Pop' : 'demo_total_population',
+                   '18+_Wht' : 'demo_white_population',
+                   '18+_Blk' : 'demo_black_population',
+                   '18+_Ind' : 'demo_indian_population',
+                   '18+_Asn' : 'demo_asian_population',
+                   '18+_Hwn' : 'demo_hawaii_population',
+                   '18+_Oth' : 'demo_other_population'})
                .assign(
                    surveyed_democrat_percentage=lambda x: 100*x['surveyed_democrat'] / x['surveyed_total'],
                    surveyed_independent_percentage=lambda x: 100*x['surveyed_independent'] / x['surveyed_total'],
                    surveyed_independent_green_percentage=lambda x: 100*x['surveyed_independent_green'] / x['surveyed_total'],
                    surveyed_libertarian_percentage=lambda x: 100*x['surveyed_libertarian'] / x['surveyed_total'],
                    surveyed_blank_percentage=lambda x: 100*x['surveyed_blank'] / x['surveyed_total'],
-                   surveyed_republican_percentage=lambda x: 100*x['surveyed_republican'] / x['surveyed_total']
+                   surveyed_republican_percentage=lambda x: 100*x['surveyed_republican'] / x['surveyed_total'],
+                   demo_white_percentage=lambda x: 100*x['demo_white_population'] / x['demo_total_population'],
+                   demo_black_percentage=lambda x: 100*x['demo_black_population'] / x['demo_total_population'],
+                   demo_indian_percentage=lambda x: 100*x['demo_indian_population'] / x['demo_total_population'],
+                   demo_asian_percentage=lambda x: 100*x['demo_asian_population'] / x['demo_total_population'],
+                   demo_hawaii_percentage=lambda x: 100*x['demo_hawaii_population'] / x['demo_total_population'],
+                   demo_other_percentage=lambda x: 100*x['demo_other_population'] / x['demo_total_population']
                ))
 
     # Select wanted columns
@@ -76,6 +103,7 @@ if __name__ == "__main__":
         avg_value = np.mean(joined[column])
         joined[column] = joined[column].fillna(avg_value)
 
+    #
     idx = index.Index()
     geo_buffer = geo_df.assign(geometry=geo_df.buffer(0))
     for i, poly in geo_buffer.iterrows():
