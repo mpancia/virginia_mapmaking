@@ -106,6 +106,14 @@ class Cluster(object):
             self._needs_update['racial_difference'] = False
         return self._racial_difference
 
+    def compactness(self, geo_data):
+        cluster_ids = [member['name'] for member in self.members]
+        cluster_data = geo_data.loc[cluster_ids]
+        total_area = np.sum(cluster_data.area)
+        convex_hull_area = cluster_data.buffer(0).unary_union.convex_hull.area
+        compactness = total_area / convex_hull_area
+        return compactness
+
     def add_vertex(self, vertex):
         if vertex not in self.members:
             self.members = self.members.union(set([vertex]))
@@ -268,6 +276,10 @@ class Clustering(object):
             self._needs_update['political_entropy'] = False
         return self._political_entropy
 
+    def compactness(self, geo_data):
+        compactness_scores = [cluster.compactness(geo_data) for cluster in self.clusters.values()]
+        return np.mean(compactness_scores)
+
     def num_competitive_districts(self):
         competitive_districts = [x for x in self.clusters.values() if x.competitiveness > .8]
         return len(competitive_districts)
@@ -369,14 +381,24 @@ class Clustering(object):
     def save_shapefile(self, geo_data, save_location):
         manifest_path = os.path.join(save_location, 'manifest.csv')
         if not os.path.exists(manifest_path):
-            row = ['path', 'variance', 'disconnected_components', 'competitive_districts', 'racial_dissimilarity']
+            row = ['path',
+                   'variance',
+                   'disconnected_components',
+                   'competitive_districts',
+                   'racial_dissimilarity',
+                   'compactness']
             with open(manifest_path, "w") as file:
                 writer = csv.writer(file)
                 writer.writerow(row)
 
         logging.info('Written to {}'.format(save_location))
         disconnected_count = np.sum([x for x in self.cluster_component_counts.values() if x > 1])
-        row = [self.stub + '.geojson', self.population_variance, disconnected_count, self.num_competitive_districts(), self.racial_dissimilarity]
+        row = [self.stub + '.geojson',
+               self.population_variance,
+               disconnected_count,
+               self.num_competitive_districts(),
+               self.racial_dissimilarity,
+               self.compactness(geo_data)]
         with open(manifest_path, "a") as file:
             writer = csv.writer(file)
             writer.writerow(row)

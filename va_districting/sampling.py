@@ -9,7 +9,7 @@ from clustering import Cluster, Clustering
 
 
 class NeighborSampling(object):
-    def __init__(self, initial_clustering: Clustering):
+    def __init__(self, initial_clustering: Clustering, geo_data):
         self.initial_clustering = initial_clustering
         logging.info("Initial clustering has {} population variance and {} political entropy."\
                     .format(initial_clustering.population_variance, \
@@ -22,10 +22,10 @@ class NeighborSampling(object):
         self.min_variance = initial_clustering.population_variance
         self.most_comp_districts = initial_clustering.num_competitive_districts()
         self.lowest_racial_dissimilarity = initial_clustering.racial_dissimilarity
+        self.geo_data = geo_data
 
-    @staticmethod
-    def calculate_energy(clustering: Clustering, β: float):
-        political_energy = 1/ clustering.political_entropy
+    def calculate_energy(self, clustering: Clustering, β: float):
+        political_energy = 1 / clustering.political_entropy
         population_energy = clustering.population_variance
         racial_energy = clustering.racial_dissimilarity
         total_energy = np.exp(-β*(political_energy + population_energy + racial_energy))
@@ -98,14 +98,16 @@ if __name__ == '__main__':
     geo_data = gpd.read_file(DEMO_SHAPEFILE_LOCATION).set_index('CODE')
     stubs = set([os.path.splitext(x)[0] for x in os.listdir(LOAD_LOCATION)])
     initial_clusterings = [Clustering.load(os.path.join(LOAD_LOCATION, stub)) for stub in stubs]
-    for clustering in initial_clusterings:
-        sampling = NeighborSampling(clustering)
+    for clustering in initial_clusterings[::-1]:
+        sampling = NeighborSampling(clustering, geo_data)
         for i in tqdm(range(10000)):
             sampling.find_acceptable_neighbor()
             if i % 1000 == 0:
                 logging.info("Lowering temperature.")
                 sampling.β = sampling.β * (1.1)
-        for new_clustering in set(sampling.best_comp_districts + sampling.best_variance_districts):
+        for new_clustering in set(sampling.best_comp_districts + \
+                                  sampling.best_variance_districts + \
+                                  sampling.best_racial_districts):
             new_clustering.save(SAVE_LOCATION)
             new_clustering.save_shapefile(geo_data, SAVE_LOCATION)
 
