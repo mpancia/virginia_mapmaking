@@ -15,6 +15,7 @@ DEMOGRAPHIC_LOCATION = "../data/demo_data.csv"
 DEMO_SHAPEFILE_LOCATION = "../data/demo_shapefile.geojson"
 GRAPH_LOCATION = "../data/graph.graphml"
 
+# Define the columns that give information about political competition
 POLITICAL_COMPETITION_COLUMNS = [
         'surveyed_democrat_percentage',
         'surveyed_independent_green_percentage',
@@ -24,6 +25,7 @@ POLITICAL_COMPETITION_COLUMNS = [
         'surveyed_libertarian_percentage',
         'surveyed_total']
 
+# Define the columns that give information about racial demographics
 RACIAL_DEMOGRAPHIC_COLUMNS = [
         'demo_total_population',
         'demo_white_percentage',
@@ -34,8 +36,10 @@ RACIAL_DEMOGRAPHIC_COLUMNS = [
         'demo_other_percentage'
 ]
 
+# Define the columns that give information about population
 POPULATION_COLUMNS = ['population']
 
+# Collect all the columns for the output
 DEMO_COLUMNS = POLITICAL_COMPETITION_COLUMNS + \
     POPULATION_COLUMNS + \
     RACIAL_DEMOGRAPHIC_COLUMNS
@@ -50,8 +54,8 @@ if __name__ == "__main__":
     # Pad code to correct length and set it to the index
     demo_df["CODE"] = demo_df["CODE"].astype(str).map(lambda x: x.zfill(7))
     demo_df = (demo_df
-               .set_index(demo_df["CODE"])
-               .rename(columns={
+               .set_index(demo_df["CODE"]) # make CODE the index
+               .rename(columns={ # rename the columns for consistency
                    'Population' : 'population',
                    'Democratic' : 'surveyed_democrat',
                    'Independent' : 'surveyed_independent',
@@ -67,7 +71,7 @@ if __name__ == "__main__":
                    '18+_Asn' : 'demo_asian_population',
                    '18+_Hwn' : 'demo_hawaii_population',
                    '18+_Oth' : 'demo_other_population'})
-               .assign(
+               .assign( # Create percentage columns
                    surveyed_democrat_percentage=lambda x: 100*x['surveyed_democrat'] / x['surveyed_total'],
                    surveyed_independent_percentage=lambda x: 100*x['surveyed_independent'] / x['surveyed_total'],
                    surveyed_independent_green_percentage=lambda x: 100*x['surveyed_independent_green'] / x['surveyed_total'],
@@ -103,12 +107,13 @@ if __name__ == "__main__":
         avg_value = np.mean(joined[column])
         joined[column] = joined[column].fillna(avg_value)
 
-    #
+    # Create index for fast intersections
     idx = index.Index()
     geo_buffer = geo_df.assign(geometry=geo_df.buffer(0))
     for i, poly in geo_buffer.iterrows():
         idx.insert(int(i), poly.geometry.bounds)
 
+    # Create edge list for precinct adjacency graph based on precincts being within 10M of one-another
     edges = []
     for i, precinct in geo_buffer.iterrows():
         precinct_id = precinct.CODE
@@ -124,6 +129,7 @@ if __name__ == "__main__":
     except OSError:
         pass
 
+    # Write CSV of edgelist
     pd.DataFrame(edges, columns=["source_id", "target_id"]).to_csv(ADJ_LIST_LOCATION, index=False)
 
     # Create graph
@@ -132,7 +138,7 @@ if __name__ == "__main__":
     graph.add_vertices(distinct_precincts)
     graph.add_edges(edges)
 
-    # Add metadata to graph
+    # Add metadata to graph from DEMO_COLUMNS
     for column in DEMO_COLUMNS:
         for row in joined[["CODE", column]].itertuples():
             vertex_id = row[1]
