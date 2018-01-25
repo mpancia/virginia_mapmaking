@@ -1,5 +1,4 @@
 import os
-import copy
 import random
 import logging
 
@@ -11,9 +10,9 @@ from clustering import Cluster, Clustering
 class NeighborSampling(object):
     def __init__(self, initial_clustering: Clustering, geo_data):
         self.initial_clustering = initial_clustering
-        logging.info("Initial clustering has {} population variance and {} political entropy."\
-                    .format(initial_clustering.population_variance, \
-                            initial_clustering.political_entropy))
+        logging.info("Initial clustering has {} population variance and {} political entropy." \
+                     .format(initial_clustering.population_variance, \
+                             initial_clustering.political_entropy))
         self.sampled_neighbors = [initial_clustering]
         self.β = 1
         self.best_variance_districts = [initial_clustering]
@@ -28,7 +27,7 @@ class NeighborSampling(object):
         political_energy = 1 / clustering.political_entropy
         population_energy = clustering.population_variance
         racial_energy = clustering.racial_dissimilarity
-        total_energy = np.exp(-β*(political_energy + population_energy + racial_energy))
+        total_energy = np.exp(-β * (political_energy + population_energy + racial_energy))
         return total_energy
 
     @staticmethod
@@ -78,10 +77,13 @@ class NeighborSampling(object):
                     self.min_variance = population_variance
                     self.best_variance_districts.append(candidate)
                     self.best_variance_districts = self.best_variance_districts[::-1][:10][::-1]
-                logging.info("Accepted sample with energy {:.2e}, acceptance ratio {:.2e}, population variance {:.2e}, comp districts {}, dissimilarity index {}"\
-                             .format(candidate_energy, acceptance_ratio, population_variance, competitive_districts, dissimilarity))
+                logging.info(
+                    "Accepted sample with energy {:.2e}, acceptance ratio {:.2e}, population variance {:.2e}, comp districts {}, dissimilarity index {}" \
+                    .format(candidate_energy, acceptance_ratio, population_variance, competitive_districts,
+                            dissimilarity))
             else:
-                logging.info("Rejected sample with energy {:.2e} and acceptance ratio {:.2e}".format(candidate_energy, acceptance_ratio))
+                logging.info("Rejected sample with energy {:.2e} and acceptance ratio {:.2e}".format(candidate_energy,
+                                                                                                     acceptance_ratio))
 
 
 if __name__ == '__main__':
@@ -92,7 +94,8 @@ if __name__ == '__main__':
     from parse_data import (DEMO_SHAPEFILE_LOCATION, GRAPH_LOCATION,
                             POLITICAL_COMPETITION_COLUMNS)
     import geopandas as gpd
-#    logging.basicConfig(level=logging.INFO)
+
+    #    logging.basicConfig(level=logging.INFO)
     LOAD_LOCATION = str(Path('../seed_maps/').resolve())
     SAVE_LOCATION = str(Path('../output_maps/').resolve())
     geo_data = gpd.read_file(DEMO_SHAPEFILE_LOCATION).set_index('CODE')
@@ -110,5 +113,3 @@ if __name__ == '__main__':
                                   sampling.best_racial_districts):
             new_clustering.save(SAVE_LOCATION)
             new_clustering.save_shapefile(geo_data, SAVE_LOCATION)
-
-

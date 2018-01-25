@@ -2,7 +2,6 @@
 import os
 import uuid
 import pickle
-import csv
 import random
 import logging
 import itertools
@@ -20,11 +19,29 @@ from scipy.stats import entropy
 from parse_data import (GRAPH_LOCATION,
                         POLITICAL_COMPETITION_COLUMNS)
 
+
 # pylint: disable=E1136,E1137,E1101,C0111,R0904
 
 class Cluster(object):
     """A Class to represent clusters."""
+
     def __init__(self, graph: Graph, members: Set[Vertex]):
+        """Make a new cluster.
+
+        A cluster is defined by the underlying graph and a set of vertices from that graph.
+
+        Properties:
+            total_population (float): The total population in the cluster, as the sum of the populations of each vertex. It is assumed that each vertex has a population attribute.
+            num_components (int): The number of disconnected components in the cluster.
+            political_entropy (float): The entropy of the distribution of political parties in the cluster. Assumes presence of demographic columns as vertex attributes.
+            competitiveness (float): The political competitiveness of the cluster, based on the Democrat/Republican split. Assumes presence of demographic columns as vertex attributes.
+            racial_difference (float): The
+
+
+        Args:
+            graph: The underlying graph where the clusters live.
+            members: A set of vertices from the graph that make up the cluster.
+        """
         self._members = set(members)
         self.graph = graph
         self._neighbors = None
@@ -33,12 +50,12 @@ class Cluster(object):
         self._political_entropy = None
         self._competitiveness = None
         self._racial_difference = None
-        self._needs_update = {'total_population' : True,
-                              'neighbors' : True,
-                              'num_components' : True,
+        self._needs_update = {'total_population': True,
+                              'neighbors': True,
+                              'num_components': True,
                               'political_entropy': True,
                               'competitiveness': True,
-                              'racial_difference' : True}
+                              'racial_difference': True}
 
     @property
     def members(self):
@@ -52,8 +69,8 @@ class Cluster(object):
     def neighbors(self):
         if self._needs_update['neighbors']:
             self._neighbors = set([neighbor for member in self.members for \
-                                        neighbor in member.neighbors() \
-                                        if neighbor not in self.members])
+                                   neighbor in member.neighbors() \
+                                   if neighbor not in self.members])
             self._needs_update['neighbors'] = False
         return self._neighbors
 
@@ -68,7 +85,7 @@ class Cluster(object):
     @property
     def total_population(self):
         if self._needs_update['total_population']:
-            self._total_population = np.sum([vertex['population'] for\
+            self._total_population = np.sum([vertex['population'] for \
                                              vertex in self.members])
             self._needs_update['total_population'] = False
         return self._total_population
@@ -90,19 +107,21 @@ class Cluster(object):
     @property
     def competitiveness(self):
         if self._needs_update['competitiveness']:
-            total_republicans = np.sum([vertex['surveyed_republican_percentage']*vertex['population'] for vertex in self.members])
-            total_democrats = np.sum([vertex['surveyed_democrat_percentage']*vertex['population'] for vertex in self.members])
-            self._competitiveness = np.min([total_democrats, total_republicans]) / np.max([total_democrats, total_republicans])
+            total_republicans = np.sum(
+                [vertex['surveyed_republican_percentage'] * vertex['population'] for vertex in self.members])
+            total_democrats = np.sum(
+                [vertex['surveyed_democrat_percentage'] * vertex['population'] for vertex in self.members])
+            self._competitiveness = np.min([total_democrats, total_republicans]) / np.max(
+                [total_democrats, total_republicans])
             self._needs_update['competitiveness'] = False
         return self._competitiveness
-
 
     @property
     def racial_difference(self):
         if self._needs_update['racial_difference']:
-            total_white = np.sum([vertex['demo_white_percentage']*vertex['population'] for vertex in self.members])
-            total_black = np.sum([vertex['demo_black_percentage']*vertex['population'] for vertex in self.members])
-            self._racial_difference = {'total_white' : total_white, 'total_black' : total_black}
+            total_white = np.sum([vertex['demo_white_percentage'] * vertex['population'] for vertex in self.members])
+            total_black = np.sum([vertex['demo_black_percentage'] * vertex['population'] for vertex in self.members])
+            self._racial_difference = {'total_white': total_white, 'total_black': total_black}
             self._needs_update['racial_difference'] = False
         return self._racial_difference
 
@@ -137,6 +156,15 @@ class Cluster(object):
         return vertex in self.neighbors
 
     def check_disconnected_by_removal(self, vertex):
+        """ Check if the cluster becomes disconnected if the input vertex is removed.
+
+        Args:
+            vertex: A vertex to remove.
+
+        Returns:
+            bool: True if the cluster becomes disconnected.
+
+        """
         if vertex in self.members:
             removed_vertices = [member for member in self.members if member != vertex]
             new_subgraph = self.graph.subgraph(removed_vertices)
@@ -152,8 +180,28 @@ class Cluster(object):
 
 
 class Clustering(object):
+    """A class to represent a clustering."""
 
     def __init__(self, graph: Graph, clusters: Dict[int, Cluster]):
+        """
+
+        Args:
+            graph (igraph.Graph): The underlying graph for the clustering.
+            clusters (dict): A dictionary mapping a cluster id (int) to a Cluster.
+
+        Properties:
+            unused_vertices (Set[Vertex]): The set of vertices that belong to no cluster.
+            used_vertices (Set[Vertex]): The set of vertices that belong to a cluster.
+            cluster_neighbors (Set[Vertex]): All of the vertices in the graph that are adjacent to some member of a given cluster.
+            unused_cluster_neighbors (Set[Vertex]): All of the vertices in the graph that are adjacent to some member of a given cluster and do not belong to a cluster.
+            cluster_lookup (dict): A dictionary that looks up the ID of the cluster that a given vertex belongs to.
+            cluster_component_counts (dict): A dictionary mapping cluster IDs to the number of connected components they have.
+            cluster_sizes (dict): A dictionary mapping cluster IDs to the number of members they have.
+            population_variance (float): The population variance of the cluster, as calculated in the method.
+            political_entropy (float): The political entropy of the cluster, as calculated in the method.
+            racial_dissimilarity (float): The racial dissimilarity of the cluster, as calculated in the method.
+        """
+
         self.graph = graph
         self.clusters = clusters
         self._unused_vertices = None
@@ -200,7 +248,8 @@ class Clustering(object):
     @property
     def cluster_neighbors(self):
         if self._needs_update['cluster_neighbors']:
-            vertex_dicts = [{neighbor : cluster_id for neighbor in list(cluster.neighbors)} for cluster_id, cluster in list(self.clusters.items())]
+            vertex_dicts = [{neighbor: cluster_id for neighbor in list(cluster.neighbors)} for cluster_id, cluster in
+                            list(self.clusters.items())]
             keys = {k for d in vertex_dicts for k in d}
             merged_dict = {k: set([d.get(k, None) for d in vertex_dicts if d.get(k, None) is not None]) for k in keys}
             self._cluster_neighbors = merged_dict
@@ -214,11 +263,10 @@ class Clustering(object):
             self._needs_update['unused_cluster_neighbors'] = False
         return self._unused_cluster_neighbors
 
-
     @property
     def cluster_lookup(self):
         if self._needs_update['cluster_lookup']:
-            self._cluster_lookup = {vertex['name'] : cluster_id for \
+            self._cluster_lookup = {vertex['name']: cluster_id for \
                                     cluster_id, cluster in self.clusters.items() \
                                     for vertex in cluster.members}
             self._needs_update['cluster_lookup'] = False
@@ -228,7 +276,7 @@ class Clustering(object):
     def cluster_component_counts(self):
         if self._needs_update['cluster_component_counts']:
             self._cluster_component_counts = {id: cluster.num_components for
-                    id, cluster in list(self.clusters.items())}
+                                              id, cluster in list(self.clusters.items())}
             self._needs_update['cluster_component_counts'] = False
         return self._cluster_component_counts
 
@@ -245,16 +293,11 @@ class Clustering(object):
         if self._needs_update['population_variance']:
             population_sizes = np.array(list(self.cluster_sizes.values()))
             avg_population_size = np.mean(population_sizes)
-            pop_variations = population_sizes/avg_population_size - 1
+            pop_variations = population_sizes / avg_population_size - 1
             self._population_energy = np.std(pop_variations)
             self._population_variance = np.max(np.abs(pop_variations))
             self._needs_update['population_variance'] = False
         return self._population_variance
-
-    @property
-    def population_energy(self):
-        population_variance = self.population_variance
-        return self._population_energy
 
     @property
     def racial_dissimilarity(self):
@@ -297,7 +340,6 @@ class Clustering(object):
     def get_cluster_neighbors_by_id(self, cluster_id: int):
         return self.clusters[cluster_id].neighbors
 
-
     def label_geo_data(self, geo_data):
         cluster_df = pd.DataFrame.from_dict(self.cluster_lookup, orient='index')
         cluster_df.columns = ['cluster']
@@ -328,13 +370,6 @@ class Clustering(object):
             self.add_vertex_to_cluster_by_id(cluster_id=cluster_id,
                                              vertex=vertex_to_add)
         else:
-            # neighbor_degrees = []
-            # for neighbor in neighbors:
-            #     degree = sum([neighbor in member.neighbors() for member in self.clusters[cluster_id].members])
-            #     neighbor_degrees.append((neighbor, degree))
-            # neighbor_degrees.sort(key=lambda x: x[1])
-            # low_deg_neighbor = neighbor_degrees.pop()[0]
-            # cluster_for_neighbor = self.find_cluster_for_vertex(low_deg_neighbor)
             vertex_to_add = random.choice(list(neighbors))
             cluster_for_neighbor = self.find_cluster_for_vertex(vertex_to_add)
             self.remove_vertex_from_cluster_by_id(cluster_id=cluster_for_neighbor,
@@ -375,7 +410,8 @@ class Clustering(object):
     def copy(self):
         cluster_lookup = [(self.graph.vs.find(id), cluster_id) for id, cluster_id in self.cluster_lookup.items()]
         cluster_groups = itertools.groupby(cluster_lookup, lambda x: x[1])
-        clusters = {id : Cluster(graph=self.graph, members=set([x[0] for x in members])) for id, members in cluster_groups}
+        clusters = {id: Cluster(graph=self.graph, members=set([x[0] for x in members])) for id, members in
+                    cluster_groups}
         return Clustering(graph=self.graph, clusters=clusters)
 
     def save_shapefile(self, geo_data, save_location):
@@ -408,11 +444,9 @@ class Clustering(object):
         except OSError:
             pass
         labeled_df = self.label_geo_data(geo_data)
-        labeled_df = labeled_df.fillna({'cluster' : 99})
+        labeled_df = labeled_df.fillna({'cluster': 99})
         labeled_df['geometry'] = labeled_df.buffer(0)
         labeled_df.to_file(shp_location, driver="GeoJSON")
-
-
 
     @classmethod
     def from_random_vertices(cls, seed_graph: Graph, num_clusters: int):
@@ -420,7 +454,7 @@ class Clustering(object):
         """
         random_vertices = random.sample(list(seed_graph.vs), num_clusters)
         clusters = [Cluster(graph=seed_graph, members=set([vertex])) for vertex in random_vertices]
-        return cls(seed_graph, {i : cluster for i, cluster in enumerate(clusters)})
+        return cls(seed_graph, {i: cluster for i, cluster in enumerate(clusters)})
 
     @classmethod
     def load(cls, location):
@@ -431,8 +465,43 @@ class Clustering(object):
             id_cluster_lookup = pickle.load(f)
         cluster_lookup = [(graph.vs.find(id), cluster_id) for id, cluster_id in id_cluster_lookup.items()]
         cluster_groups = itertools.groupby(cluster_lookup, lambda x: x[1])
-        clusters = {id : Cluster(graph=graph, members=set([x[0] for x in members])) for id, members in cluster_groups}
+        clusters = {id: Cluster(graph=graph, members=set([x[0] for x in members])) for id, members in cluster_groups}
         return cls(graph=graph, clusters=clusters)
+
+
+def generate_map(component):
+    clustering = Clustering.from_random_vertices(component, 99)
+    try:
+        clustering = clustering.grow_to_min_size(30000)
+    except:
+        logging.error('Generating min size failed.')
+        return generate_map(component)
+
+    unused_vertices = len(clustering.unused_vertices)
+    while unused_vertices > 0:
+        try:
+            clustering = clustering.add_unused_neighbor()
+            unused_vertices = len(clustering.unused_vertices)
+        except:
+            logging.error('Remainder allocation failed with {} unused vertices.'.format(unused_vertices))
+            return generate_map(component)
+
+    unused_vertices = len(clustering.unused_vertices)
+    if unused_vertices > 0:
+        logging.error('Remainder allocation failed with {} unused vertices.'.format(unused_vertices))
+        return generate_map(component)
+
+    disconnected_count = np.sum([x for x in clustering.cluster_component_counts.values() if x > 1])
+    if disconnected_count > 0:
+        logging.error('{} disconnected components.'.format(disconnected_count))
+        return generate_map(component)
+
+    if clustering.population_variance > 5:
+        logging.error('Pop variance too high: {}'.format(clustering.population_variance))
+        return generate_map(component)
+    else:
+        return clustering
+
 
 if __name__ == "__main__":
     import csv
@@ -444,39 +513,6 @@ if __name__ == "__main__":
 
     graph = igraph.read(GRAPH_LOCATION, format='graphml')
     large_component = graph.subgraph(graph.components()[0])
-
-    def generate_map(component):
-        clustering = Clustering.from_random_vertices(component, 99)
-        try:
-            clustering = clustering.grow_to_min_size(30000)
-        except:
-            logging.error('Generating min size failed.')
-            return generate_map(component)
-
-        unused_vertices = len(clustering.unused_vertices)
-        while unused_vertices > 0:
-            try:
-                clustering = clustering.add_unused_neighbor()
-                unused_vertices = len(clustering.unused_vertices)
-            except:
-                logging.error('Remainder allocation failed with {} unused vertices.'.format(unused_vertices))
-                return generate_map(component)
-
-        unused_vertices = len(clustering.unused_vertices)
-        if unused_vertices > 0:
-            logging.error('Remainder allocation failed with {} unused vertices.'.format(unused_vertices))
-            return generate_map(component)
-
-        disconnected_count = np.sum([x for x in clustering.cluster_component_counts.values() if x > 1])
-        if disconnected_count > 0:
-            logging.error('{} disconnected components.'.format(disconnected_count))
-            return generate_map(component)
-
-        if clustering.population_variance > 5:
-            logging.error('Pop variance too high: {}'.format(clustering.population_variance))
-            return generate_map(component)
-        else:
-            return clustering
 
     for i in range(NUM_TO_GENERATE):
         clustering = generate_map(large_component)
